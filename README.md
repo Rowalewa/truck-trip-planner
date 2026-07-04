@@ -3,6 +3,24 @@
 A high-performance, **containerless truck trip optimization** and **Hours of Service (HOS)** simulation engine built with **Django Rest Framework (DRF)** and **React**. This platform models full Federal Motor Carrier Safety Administration (FMCSA) commercial driving compliance alongside dynamic, geo-fenced commercial fuel stops across the United States.
 
 ---
+## 📊 Dashboard Preview
+
+### 🗺️ Live Route Planning & ELD Tracking
+Here is the core optimization engine in action, managing advanced spatial routes and tracking historical driving cycles:
+
+<img width="1440" height="812" alt="E127F5AD-E88B-448F-B45E-A42476977DCA" src="https://github.com/user-attachments/assets/a845a341-04c9-4b02-9d78-2898dbd4dd4e" />
+
+
+### 📈 Multi-Day Hours of Service Logs
+The platform dynamically splits continuous trip timelines into exact 24-hour buckets, tracking driver compliance and delivery completion across multiple days:
+
+<img width="1440" height="812" alt="64B9855D-87DE-487C-A95E-6B2042A6E30F" src="https://github.com/user-attachments/assets/f6aa7ac9-47b4-44bf-9d16-eb2b6985c2c0" />
+
+<img width="1440" height="812" alt="B10928D9-CB63-45F6-A273-D540705D5BB2" src="https://github.com/user-attachments/assets/aea268e5-a99e-4730-a05b-31aa69df0780" />
+
+
+
+---
 
 ## 🚀 Key Features
 
