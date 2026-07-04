@@ -126,7 +126,15 @@ function CityAutocompleteInput({ label, value, onChange, citiesList, isCsvLoadin
 }
 
 // Custom 24-Hour ELD Grid Line Graph Renderer
-function EldGrid({ dayNumber, events }) {
+function formatTime(minuteOfDay) {
+  const h = Math.floor(minuteOfDay / 60) % 24;
+  const m = Math.round(minuteOfDay % 60);
+  const period = h < 12 ? 'AM' : 'PM';
+  const displayH = h % 12 === 0 ? 12 : h % 12;
+  return `${displayH}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+function EldGrid({ dayNumber, events, dailySummary }) {
   const svgWidth = 600;
   const svgHeight = 140;
   const labelWidth = 100;
@@ -140,9 +148,9 @@ function EldGrid({ dayNumber, events }) {
   };
 
   const getStatusKey = (status) => {
-    if (status.includes('Driving')) return 'Driving';
-    if (status.includes('Sleeper')) return 'Sleeper Berth';
     if (status.includes('On Duty')) return 'On Duty (Not Driving)';
+    if (status.includes('Sleeper')) return 'Sleeper Berth';
+    if (status.includes('Driving')) return 'Driving';
     return 'Off Duty';
   };
 
@@ -175,7 +183,7 @@ function EldGrid({ dayNumber, events }) {
     gridLines.push(
       <g key={i}>
         <line x1={x} y1={10} x2={x} y2={130} stroke="#e2e8f0" strokeDasharray={i % 4 === 0 ? '0' : '2'} />
-        {i % 2 === 0 && <text x={x} y={138} fontSize="9" textAnchor="middle" fill="#94a3b8">{i}</text>}
+        {i % 2 === 0 && <text x={x} y={138} fontSize="9" textAnchor="middle" fill="#94a3b8">{i === 24 ? 'Mid' : i}</text>}
       </g>
     );
   }
@@ -188,11 +196,41 @@ function EldGrid({ dayNumber, events }) {
           <g key={label}>
             <text x="5" y={y + 4} fontSize="10" fontWeight="600" fill="#64748b">{label}</text>
             <line x1={labelWidth} y1={y} x2={svgWidth} y2={y} stroke="#f1f5f9" strokeWidth="1" />
+            {dailySummary && (
+              <text x={svgWidth - 5} y={y + 4} fontSize="10" fontWeight="600" textAnchor="end" fill="#334155">
+                {(dailySummary[label] / 60).toFixed(2)}h
+              </text>
+            )}
           </g>
         ))}
         {gridLines}
         {pathD && <path d={pathD} fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
       </svg>
+
+      <table style={{ width: '100%', marginTop: '12px', borderCollapse: 'collapse', fontSize: '12px' }}>
+        <thead>
+          <tr style={{ textAlign: 'left', color: '#64748b' }}>
+            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0' }}>Time</th>
+            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0' }}>Status</th>
+            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0' }}>Remarks</th>
+          </tr>
+        </thead>
+        <tbody>
+          {events.map((evt, idx) => (
+            <tr key={idx}>
+              <td style={{ padding: '4px 8px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
+                {formatTime(evt.start_minute)}
+              </td>
+              <td style={{ padding: '4px 8px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
+                {evt.status}
+              </td>
+              <td style={{ padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                {evt.remark}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -404,7 +442,12 @@ export default function App() {
 
               <h4 style={{ color: '#f8fafc' }}>Hours of Service Grid Logs</h4>
               {Object.keys(tripData.eld_days).sort((a,b)=>a-b).map(dayNum => (
-                <EldGrid key={dayNum} dayNumber={dayNum} events={tripData.eld_days[dayNum]} />
+                <EldGrid
+                  key={dayNum}
+                  dayNumber={dayNum}
+                  events={tripData.eld_days[dayNum]}
+                  dailySummary={tripData.daily_summaries ? tripData.daily_summaries[dayNum] : null}
+                />
               ))}
             </div>
           )}
