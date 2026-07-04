@@ -194,6 +194,43 @@ export default function App() {
 
         {/* Right Dynamic Map Panel */}
         <main style={{ flexGrow: 1, position: 'relative', height: '100%' }}>
+          
+          {/* Floating Map Legend Overlay */}
+          <div style={{
+            position: 'absolute',
+            bottom: '24px',
+            left: '24px',
+            background: 'rgba(255, 255, 255, 0.95)',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            zIndex: 1000,
+            fontFamily: 'sans-serif',
+            fontSize: '12px',
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
+          }}>
+            <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '2px', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.5px' }}>Route Legend</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#10b981', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
+              <span style={{ color: '#334155', fontWeight: '500' }}>Current Location (Start)</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#f59e0b', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
+              <span style={{ color: '#334155', fontWeight: '500' }}>Pickup Point</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#ef4444', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
+              <span style={{ color: '#334155', fontWeight: '500' }}>Dropoff Destination</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#3b82f6', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
+              <span style={{ color: '#334155', fontWeight: '500' }}>Optimized Fuel Stops</span>
+            </div>
+          </div>
+
           <MapContainer center={[37.8, -96]} zoom={4} style={{ width: '100%', height: '100%' }}>
             <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {tripData && tripData.route_geometry && (
