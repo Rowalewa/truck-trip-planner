@@ -1,7 +1,6 @@
 import os
 import requests
 import math
-import time
 from dotenv import load_dotenv
 from .models import TruckStop
 
@@ -239,27 +238,56 @@ def _log_event(state, status, duration_mins, description):
     state["total_minutes"] = end_time
 
 
+def _check_and_apply_mandatory_breaks(state):
+    """Check for mandatory breaks and apply them."""
+    if state["cycle_minutes_used"] >= CYCLE_LIMIT_MINUTES:
+        _log_event(state, "Off Duty", RESTART_MINUTES, "Mandatory 34-hour restart (70-hour/8-day cycle limit reached)")
+        return True
+    if state["driving_minutes_today"] >= DAILY_DRIVING_LIMIT_MIN or state["duty_minutes_today"] >= DUTY_WINDOW_LIMIT_MIN:
+        _log_event(state, "Sleeper Berth", DAILY_RESET_MIN, "Mandatory 10-hour rest period (daily limit reached)")
+        return True
+    if state["elapsed_since_last_break"] >= BREAK_REQUIRED_AFTER_MIN:
+        _log_event(state, "Off Duty", 30, "Mandatory 30-minute rest break (8-hour rule)")
+        return True
+    return False
+
+
+def _calculate_driving_constraints(state, speed_mpm):
+    """Calculate time constraints for driving."""
+    mins_to_cycle_limit = max(0, CYCLE_LIMIT_MINUTES - state["cycle_minutes_used"])
+    mins_to_8_hr_break = max(0, BREAK_REQUIRED_AFTER_MIN - state["elapsed_since_last_break"])
+    mins_to_11_hr_break = max(0, DAILY_DRIVING_LIMIT_MIN - state["driving_minutes_today"])
+    mins_to_14_hr_break = max(0, DUTY_WINDOW_LIMIT_MIN - state["duty_minutes_today"])
+    mins_to_fuel = max(0, (FUEL_INTERVAL_MILES - state["odometer_since_fuel"]) / speed_mpm) if speed_mpm > 0 else 9999
+    return mins_to_cycle_limit, mins_to_8_hr_break, mins_to_11_hr_break, mins_to_14_hr_break, mins_to_fuel
+
+
+def _handle_fuel_stop(state, leg_data, label, start_coords, total_leg_mins, remaining_mins):
+    """Handle fuel stop logic."""
+    ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
+    idx = int(ratio * (len(leg_data["path"]) - 1))
+    fuel_coords = leg_data["path"][idx] if leg_data["path"] else start_coords
+
+    cheapest_stop, fuel_price = find_cheapest_nearby_station(fuel_coords[0], fuel_coords[1])
+    gallons_needed = state["odometer_since_fuel"] / MILES_PER_GALLON
+    state["total_fuel_cost"] += gallons_needed * fuel_price
+    stop_name = cheapest_stop.name if cheapest_stop else "Nearest available fuel station"
+
+    _log_event(state, "On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
+    state["markers"].append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
+    state["odometer_since_fuel"] = 0
+
+
 def _simulate_leg(state, leg_data, label, start_coords):
     remaining_mins = int(leg_data["duration"] * 60)
     speed_mpm = leg_data["distance"] / remaining_mins if remaining_mins > 0 else 0
     total_leg_mins = max(1, int(leg_data["duration"] * 60))
 
     while remaining_mins > 0:
-        if state["cycle_minutes_used"] >= CYCLE_LIMIT_MINUTES:
-            _log_event(state, "Off Duty", RESTART_MINUTES, "Mandatory 34-hour restart (70-hour/8-day cycle limit reached)")
-            continue
-        if state["driving_minutes_today"] >= DAILY_DRIVING_LIMIT_MIN or state["duty_minutes_today"] >= DUTY_WINDOW_LIMIT_MIN:
-            _log_event(state, "Sleeper Berth", DAILY_RESET_MIN, "Mandatory 10-hour rest period (daily limit reached)")
-            continue
-        if state["elapsed_since_last_break"] >= BREAK_REQUIRED_AFTER_MIN:
-            _log_event(state, "Off Duty", 30, "Mandatory 30-minute rest break (8-hour rule)")
+        if _check_and_apply_mandatory_breaks(state):
             continue
 
-        mins_to_cycle_limit = max(0, CYCLE_LIMIT_MINUTES - state["cycle_minutes_used"])
-        mins_to_8_hr_break = max(0, BREAK_REQUIRED_AFTER_MIN - state["elapsed_since_last_break"])
-        mins_to_11_hr_break = max(0, DAILY_DRIVING_LIMIT_MIN - state["driving_minutes_today"])
-        mins_to_14_hr_break = max(0, DUTY_WINDOW_LIMIT_MIN - state["duty_minutes_today"])
-        mins_to_fuel = max(0, (FUEL_INTERVAL_MILES - state["odometer_since_fuel"]) / speed_mpm) if speed_mpm > 0 else 9999
+        mins_to_cycle_limit, mins_to_8_hr_break, mins_to_11_hr_break, mins_to_14_hr_break, mins_to_fuel = _calculate_driving_constraints(state, speed_mpm)
 
         drive_chunk = min(
             remaining_mins,
@@ -276,18 +304,7 @@ def _simulate_leg(state, leg_data, label, start_coords):
             remaining_mins -= drive_chunk
 
         if state["odometer_since_fuel"] >= FUEL_INTERVAL_MILES or (drive_chunk == 0 and int(mins_to_fuel) <= 0):
-            ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
-            idx = int(ratio * (len(leg_data["path"]) - 1))
-            fuel_coords = leg_data["path"][idx] if leg_data["path"] else start_coords
-
-            cheapest_stop, fuel_price = find_cheapest_nearby_station(fuel_coords[0], fuel_coords[1])
-            gallons_needed = state["odometer_since_fuel"] / MILES_PER_GALLON
-            state["total_fuel_cost"] += gallons_needed * fuel_price
-            stop_name = cheapest_stop.name if cheapest_stop else "Nearest available fuel station"
-
-            _log_event(state, "On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
-            state["markers"].append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
-            state["odometer_since_fuel"] = 0
+            _handle_fuel_stop(state, leg_data, label, start_coords, total_leg_mins, remaining_mins)
         elif drive_chunk == 0:
             _log_event(state, "Off Duty", 30, "Mandatory 30-minute rest break (8-hour rule)")
 
