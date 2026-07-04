@@ -179,7 +179,7 @@ export default function App() {
                 </div>
                 <div>
                   <small style={{ color: '#64748b', display: 'block' }}>Est. Fuel Cost</small>
-                  <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#10b981' }}>${tripData.total_fuel_cost}</div>
+                  <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#10b981' }}>${Number(tripData.total_fuel_cost).toFixed(2)}</div>
                 </div>
               </div>
 

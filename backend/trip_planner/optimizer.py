@@ -146,7 +146,7 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
         nonlocal odometer_since_fuel, total_fuel_cost
         remaining_mins = int(leg_data['duration'] * 60)
         speed_mpm = leg_data['distance'] / remaining_mins if remaining_mins > 0 else 0
-        
+    
         while remaining_mins > 0:
             if driving_minutes_today >= 660 or duty_minutes_today >= 840:
                 log_event("Sleeper Berth", 600, "Mandatory 10-hour rest period (Daily cycle reset)")
@@ -168,42 +168,57 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
                 remaining_mins -= drive_chunk
                 
                 if odometer_since_fuel >= SAFETY_BUFFER_MILES:
-                    cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
-                    fuel_price = float(cheapest_stop.retail_price) if cheapest_stop else FALLBACK_FUEL_PRICE
-                    
-                    gallons_needed = odometer_since_fuel / MILES_PER_GALLON
-                    total_fuel_cost += (gallons_needed * fuel_price)
-                    
-                    stop_name = cheapest_stop.name if cheapest_stop else "Optimized Fuel Station"
-                    log_event("On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
-                    
-                    ratio = min(1.0, (int(leg_data['duration'] * 60) - remaining_mins) / max(1, int(leg_data['duration'] * 60)))
-                    idx = int(ratio * (len(leg_data['path']) - 1))
-                    fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
-                    
-                    markers.append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
-                    odometer_since_fuel = 0
-            else:
-                if odometer_since_fuel >= SAFETY_BUFFER_MILES or int(mins_to_fuel_buffer) <= 0:
-                    cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
-                    fuel_price = float(cheapest_stop.retail_price) if cheapest_stop else FALLBACK_FUEL_PRICE
-                    
-                    gallons_needed = odometer_since_fuel / MILES_PER_GALLON
-                    total_fuel_cost += (gallons_needed * fuel_price)
-                    
-                    stop_name = cheapest_stop.name if cheapest_stop else "Optimized Fuel Station"
-                    log_event("On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
-                    
+                    # 1. Calculate physical coordinates where the safety buffer was crossed
                     total_leg_mins = max(1, int(leg_data['duration'] * 60))
                     ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
                     idx = int(ratio * (len(leg_data['path']) - 1))
                     fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
                     
+                    # 2. Query locally for the cheapest station physically near the truck's path location
+                    fuel_lat, fuel_lon = fuel_coords[0], fuel_coords[1]
+                    nearby_stops = TruckStop.objects.filter(
+                        latitude__range=(fuel_lat - 1.5, fuel_lat + 1.5),
+                        longitude__range=(fuel_lon - 1.5, fuel_lon + 1.5)
+                    )
+                    cheapest_stop = nearby_stops.order_by('retail_price').first()
+                    if not cheapest_stop:
+                        cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
+                    
+                    fuel_price = float(cheapest_stop.retail_price) if cheapest_stop else FALLBACK_FUEL_PRICE
+                    gallons_needed = odometer_since_fuel / MILES_PER_GALLON
+                    total_fuel_cost += (gallons_needed * fuel_price)
+                    
+                    stop_name = cheapest_stop.name if cheapest_stop else "Optimized Fuel Station"
+                    log_event("On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
+                    markers.append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
+                    odometer_since_fuel = 0
+            else:
+                if odometer_since_fuel >= SAFETY_BUFFER_MILES or int(mins_to_fuel_buffer) <= 0:
+                    total_leg_mins = max(1, int(leg_data['duration'] * 60))
+                    ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
+                    idx = int(ratio * (len(leg_data['path']) - 1))
+                    fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
+                    
+                    fuel_lat, fuel_lon = fuel_coords[0], fuel_coords[1]
+                    nearby_stops = TruckStop.objects.filter(
+                        latitude__range=(fuel_lat - 1.5, fuel_lat + 1.5),
+                        longitude__range=(fuel_lon - 1.5, fuel_lon + 1.5)
+                    )
+                    cheapest_stop = nearby_stops.order_by('retail_price').first()
+                    if not cheapest_stop:
+                        cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
+                    
+                    fuel_price = float(cheapest_stop.retail_price) if cheapest_stop else FALLBACK_FUEL_PRICE
+                    gallons_needed = odometer_since_fuel / MILES_PER_GALLON
+                    total_fuel_cost += (gallons_needed * fuel_price)
+                    
+                    stop_name = cheapest_stop.name if cheapest_stop else "Optimized Fuel Station"
+                    log_event("On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
                     markers.append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
                     odometer_since_fuel = 0
                 else:
                     log_event("Off Duty", 30, "Mandatory 30-minute rest break (8-hour rule)")
-
+                    
     # Execute Simulation Legs
     state_1 = pickup_str.split(",")[-1].strip().split(" ")[0]
     simulate_leg(leg_1, state_1, "Pickup location")
