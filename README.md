@@ -8,17 +8,34 @@ A high-performance, **containerless truck trip optimization** and **Hours of Ser
 ### 🗺️ Live Route Planning & ELD Tracking
 Here is the core optimization engine in action, managing advanced spatial routes and tracking historical driving cycles:
 
-<img width="1440" height="812" alt="image" src="https://github.com/user-attachments/assets/4bc9e820-23fd-44f9-963a-47cbd4565dec" />
-
+<img width="1440" height="812" alt="E43AF5F4-153A-4940-B26D-05462CA263A6" src="https://github.com/user-attachments/assets/128e1622-1811-4c3d-bd97-c265e48e539a" />
 
 
 ### 📈 Multi-Day Hours of Service Logs
 The platform dynamically splits continuous trip timelines into exact 24-hour buckets, tracking driver compliance and delivery completion across multiple days:
 
-<img width="1440" height="812" alt="image" src="https://github.com/user-attachments/assets/72d63430-a403-4dfb-92b4-4019f91673e9" />
+> **Sample day 1 log graph
+
+<img width="1440" height="812" alt="1F27CCA1-818C-43AC-B342-7F28429FDF2F" src="https://github.com/user-attachments/assets/c63e1559-2522-40fb-8fd8-bc39e2c8d899" />
+
+> **Sample day 2 log graph
+
+<img width="1440" height="812" alt="7540D04B-3CD5-476F-932F-F6DBBD91D442" src="https://github.com/user-attachments/assets/bff2e4c5-fbc0-42b2-90c9-8e185d5cd7da" />
+
+> **Sample day 2 & 3 log graph
+
+<img width="1440" height="812" alt="D7ED9CBE-3810-41CC-815B-62446823F803" src="https://github.com/user-attachments/assets/369eb40c-b66a-4f38-b353-cc72b0658954" />
+
+> **Sample day 3 & 4 log graph
+
+<img width="1440" height="812" alt="669B54B7-6800-4E9B-B3DA-76E9B722C07B" src="https://github.com/user-attachments/assets/e3b4e737-c3bc-4a00-af37-5d62fbb022ef" />
+
+> **Sample day 4 log graph
+
+<img width="1440" height="812" alt="5528061C-0CB4-4320-8B8A-A662DE2D71DB" src="https://github.com/user-attachments/assets/06c1a5f3-712c-46e4-83a1-3bedd9ab8653" />
 
 
-<img width="1440" height="812" alt="image" src="https://github.com/user-attachments/assets/423a0d74-0e18-41b4-bd4b-9cb6fdf359c1" />
+
 
 
 ---
