@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -12,15 +12,125 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Custom Component to draw the mandatory 24-Hour 4-Row ELD Grid Chart via Inline SVG
+// Always-Active, Ultra-Responsive Autocomplete Input Component
+function CityAutocompleteInput({ label, value, onChange, citiesList, isCsvLoading }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleInputChange = (text) => {
+    onChange(text);
+    
+    const query = text.trim().toLowerCase();
+    
+    // Dropdown is active from the very first interaction/character
+    let matches = [];
+    if (query === '') {
+      matches = citiesList.slice(0, 8); // Show primary choices on empty focus
+    } else {
+      matches = citiesList.filter(city => 
+        city.toLowerCase().includes(query)
+      ).slice(0, 8);
+    }
+
+    setSuggestions(matches);
+    setShowDropdown(true);
+  };
+
+  return (
+    <div ref={containerRef} style={{ marginBottom: '12px', position: 'relative' }}>
+      <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '4px' }}>
+        {label}
+      </label>
+      <input 
+        type="text" 
+        value={value} 
+        disabled={isCsvLoading}
+        onChange={e => handleInputChange(e.target.value)} 
+        onFocus={() => handleInputChange(value)}
+        style={{ 
+          width: '100%', 
+          padding: '10px', 
+          border: '1px solid #334155', 
+          borderRadius: '6px', 
+          boxSizing: 'border-box',
+          backgroundColor: '#1e293b',
+          color: '#fff',
+          fontSize: '14px',
+          opacity: isCsvLoading ? 0.6 : 1
+        }} 
+        placeholder={isCsvLoading ? "Streaming US location database..." : "Search US cities..."}
+        required 
+      />
+      {showDropdown && (
+        <ul style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          right: 0,
+          backgroundColor: '#1e293b',
+          border: '1px solid #334155',
+          borderRadius: '6px',
+          marginTop: '4px',
+          padding: 0,
+          listStyle: 'none',
+          maxHeight: '180px',
+          overflowY: 'auto',
+          zIndex: 99999,
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'
+        }}>
+          {suggestions.length > 0 ? (
+            suggestions.map((place, i) => (
+              <li 
+                key={i} 
+                onClick={() => {
+                  onChange(place);
+                  setShowDropdown(false);
+                }}
+                style={{ 
+                  padding: '10px 12px', 
+                  cursor: 'pointer', 
+                  fontSize: '13px', 
+                  borderBottom: '1px solid #334155', 
+                  color: '#e2e8f0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseEnter={e => e.target.style.background = '#334155'}
+                onMouseLeave={e => e.target.style.background = '#1e293b'}
+              >
+                📍 {place}
+              </li>
+            ))
+          ) : (
+            <li style={{ padding: '10px 12px', fontSize: '13px', color: '#ef4444', fontStyle: 'italic', fontWeight: 'bold' }}>
+              ❌ No matching US cities found
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// Custom 24-Hour ELD Grid Line Graph Renderer
 function EldGrid({ dayNumber, events }) {
-  // SVG Grid Dimensions
   const svgWidth = 600;
   const svgHeight = 140;
   const labelWidth = 100;
-  const chartWidth = svgWidth - labelWidth; // 500 units for 24 hours
+  const chartWidth = svgWidth - labelWidth;
 
-  // Y-axis mappings for the 4 explicit HOS categories
   const rowY = {
     'Off Duty': 25,
     'Sleeper Berth': 55,
@@ -28,7 +138,6 @@ function EldGrid({ dayNumber, events }) {
     'On Duty (Not Driving)': 115
   };
 
-  // Helper function to normalize status strings from backend
   const getStatusKey = (status) => {
     if (status.includes('Driving')) return 'Driving';
     if (status.includes('Sleeper')) return 'Sleeper Berth';
@@ -36,10 +145,8 @@ function EldGrid({ dayNumber, events }) {
     return 'Off Duty';
   };
 
-  // Convert timeline minutes (0 - 1440) to SVG X-coordinates
   const getX = (minute) => labelWidth + (minute / 1440) * chartWidth;
 
-  // Build the continuous tracking path matching assignment guidelines
   let pathD = '';
   events.forEach((evt, idx) => {
     const statusKey = getStatusKey(evt.status);
@@ -50,11 +157,10 @@ function EldGrid({ dayNumber, events }) {
     if (idx === 0) {
       pathD += `M ${startX} ${y}`;
     } else {
-      pathD += ` H ${startX}`; // Horizontal line across duration
+      pathD += ` H ${startX}`;
     }
     pathD += ` H ${endX}`;
 
-    // If there's a next event, draw a vertical line connecting to the next status row
     if (idx < events.length - 1) {
       const nextStatusKey = getStatusKey(events[idx + 1].status);
       const nextY = rowY[nextStatusKey];
@@ -62,7 +168,6 @@ function EldGrid({ dayNumber, events }) {
     }
   });
 
-  // Generate grid lines for the 24 hours
   const gridLines = [];
   for (let i = 0; i <= 24; i++) {
     const x = labelWidth + (i / 24) * chartWidth;
@@ -78,16 +183,13 @@ function EldGrid({ dayNumber, events }) {
     <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '15px', marginBottom: '20px' }}>
       <h5 style={{ margin: '0 0 10px 0', color: '#1e293b' }}>Day {dayNumber} Log Graph</h5>
       <svg width="100%" height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
-        {/* Row Grid Containers */}
         {Object.entries(rowY).map(([label, y]) => (
           <g key={label}>
             <text x="5" y={y + 4} fontSize="10" fontWeight="600" fill="#64748b">{label}</text>
             <line x1={labelWidth} y1={y} x2={svgWidth} y2={y} stroke="#f1f5f9" strokeWidth="1" />
           </g>
         ))}
-        {/* 24-Hour Vertical Grid Markers */}
         {gridLines}
-        {/* Continuous HOS Compliance Log Line Path */}
         {pathD && <path d={pathD} fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
       </svg>
     </div>
@@ -95,6 +197,8 @@ function EldGrid({ dayNumber, events }) {
 }
 
 export default function App() {
+  const [citiesList, setCitiesList] = useState([]);
+  const [isCsvLoading, setIsCsvLoading] = useState(true);
   const [formData, setFormData] = useState({
     current_location: 'Oklahoma City, OK',
     pickup_location: 'Tomah, WI',
@@ -106,10 +210,90 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Parse raw text CSV data streams dynamically
+  const parseCsvData = (csvText) => {
+    const lines = csvText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return [];
+
+    const headers = lines[0].split(',').map(h => h.replace(/^["']|["']$/g, '').trim().toLowerCase());
+    
+    // Automatically locate columns regardless of layout headers
+    let cityIdx = headers.findIndex(h => h.includes('city'));
+    let stateIdx = headers.findIndex(h => h.includes('state') || h.includes('code'));
+
+    if (cityIdx === -1) cityIdx = 3; 
+    if (stateIdx === -1) stateIdx = 1;
+
+    const parsedUnique = new Set();
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',');
+      if (cols.length > Math.max(cityIdx, stateIdx)) {
+        const city = cols[cityIdx].replace(/^["']|["']$/g, '').trim();
+        const state = cols[stateIdx].replace(/^["']|["']$/g, '').trim();
+        if (city && state && state.length === 2) {
+          parsedUnique.add(`${city}, ${state.toUpperCase()}`);
+        }
+      }
+    }
+    return Array.from(parsedUnique).sort();
+  };
+
+  // Resilient Asset Loading Sequence
+  useEffect(() => {
+    setIsCsvLoading(true);
+    
+    // Attempt 1: Load from local asset directory
+    fetch('/us_cities_ref.csv')
+      .then(res => {
+        if (!res.ok) throw new Error("Local dataset file missing.");
+        return res.text();
+      })
+      .then(text => {
+        const data = parseCsvData(text);
+        if (data.length === 0) throw new Error("Local parse yielded empty results.");
+        setCitiesList(data);
+        setIsCsvLoading(false);
+      })
+      .catch(() => {
+        // Attempt 2: Dynamic network stream failover to trusted open-source repository dataset
+        console.warn("Local file fetch failed. Streaming open-source US Cities database...");
+        fetch('https://raw.githubusercontent.com/kelvins/US-Cities-Database/main/csv/us_cities.csv')
+          .then(res => {
+            if (!res.ok) throw new Error("Network streaming failed.");
+            return res.text();
+          })
+          .then(text => {
+            const data = parseCsvData(text);
+            setCitiesList(data);
+            setIsCsvLoading(false);
+          })
+          .catch(err => {
+            console.error(err);
+            setError("Critical Failure: Unable to fetch US locations database locally or via network stream.");
+            setIsCsvLoading(false);
+          });
+      });
+  }, []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    const normalize = (str) => str.trim().toLowerCase();
+    const activeValidSet = new Set(citiesList.map(c => normalize(c)));
+
+    const isCurrentValid = activeValidSet.has(normalize(formData.current_location));
+    const isPickupValid = activeValidSet.has(normalize(formData.pickup_location));
+    const isDropoffValid = activeValidSet.has(normalize(formData.dropoff_location));
+
+    // Strict Gate Validation Check: Absolute map/run block if input isn't a valid US city
+    if (!isCurrentValid || !isPickupValid || !isDropoffValid) {
+      setError("No route for you! Enter a valid location in the US.");
+      setTripData(null); 
+      setLoading(false);
+      return;
+    }
 
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
@@ -133,58 +317,87 @@ export default function App() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'sans-serif', backgroundColor: '#f4f6f9', margin: 0 }}>
-      <header style={{ background: '#1e293b', color: '#fff', padding: '15px 20px', fontWeight: 'bold', fontSize: '18px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'sans-serif', backgroundColor: '#0f172a', margin: 0, color: '#fff' }}>
+      <header style={{ background: '#1e293b', color: '#fff', padding: '15px 20px', fontWeight: 'bold', fontSize: '18px', borderBottom: '1px solid #334155' }}>
         🚚 Autonomous Logistix Dashboard
       </header>
 
       <div style={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
-        {/* Left Input & Custom ELD Graph Panel */}
-        <aside style={{ width: '450px', background: '#fff', padding: '20px', overflowY: 'auto', boxShadow: '2px 0 5px rgba(0,0,0,0.05)', zIndex: 10 }}>
-          <h3 style={{ marginTop: 0 }}>Create Optimization Run</h3>
+        <aside style={{ width: '450px', background: '#0f172a', padding: '20px', overflowY: 'auto', borderRight: '1px solid #334155', zIndex: 10 }}>
+          <h3 style={{ marginTop: 0, color: '#f8fafc' }}>Create Optimization Run</h3>
           <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Current Location</label>
-              <input type="text" value={formData.current_location} onChange={e => setFormData({...formData, current_location: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }} required />
-            </div>
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Pickup Point</label>
-              <input type="text" value={formData.pickup_location} onChange={e => setFormData({...formData, pickup_location: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }} required />
-            </div>
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Dropoff Destination</label>
-              <input type="text" value={formData.dropoff_location} onChange={e => setFormData({...formData, dropoff_location: e.target.value})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }} required />
-            </div>
+            
+            <CityAutocompleteInput 
+              label="Current Location"
+              value={formData.current_location}
+              onChange={val => setFormData({...formData, current_location: val})}
+              citiesList={citiesList}
+              isCsvLoading={isCsvLoading}
+            />
+
+            <CityAutocompleteInput 
+              label="Pickup Point"
+              value={formData.pickup_location}
+              onChange={val => setFormData({...formData, pickup_location: val})}
+              citiesList={citiesList}
+              isCsvLoading={isCsvLoading}
+            />
+
+            <CityAutocompleteInput 
+              label="Dropoff Destination"
+              value={formData.dropoff_location}
+              onChange={val => setFormData({...formData, dropoff_location: val})}
+              citiesList={citiesList}
+              isCsvLoading={isCsvLoading}
+            />
+
             <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Cycle Hours Used</label>
-              <input type="number" value={formData.cycle_hours_used} onChange={e => setFormData({...formData, cycle_hours_used: parseInt(e.target.value) || 0})} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }} />
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '4px' }}>Cycle Hours Used</label>
+              <input 
+                type="number" 
+                value={formData.cycle_hours_used} 
+                onChange={e => setFormData({...formData, cycle_hours_used: parseInt(e.target.value) || 0})} 
+                style={{ width: '100%', padding: '10px', border: '1px solid #334155', borderRadius: '6px', boxSizing: 'border-box', backgroundColor: '#1e293b', color: '#fff' }} 
+              />
             </div>
-            <button type="submit" disabled={loading} style={{ width: '100%', background: '#2563eb', color: '#fff', border: 'none', padding: '12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>
+            
+            <button type="submit" disabled={loading || isCsvLoading} style={{ width: '100%', background: '#2563eb', color: '#fff', border: 'none', padding: '12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>
               {loading ? 'Processing Route Matrix...' : 'Generate Plan'}
             </button>
           </form>
 
-          {error && <div style={{ color: '#ef4444', marginTop: '15px' }}>⚠️ {error}</div>}
+          {error && (
+            <div style={{ 
+              color: '#ef4444', 
+              marginTop: '15px', 
+              background: 'rgba(239, 68, 68, 0.1)', 
+              padding: '12px', 
+              borderRadius: '6px', 
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              fontWeight: '600'
+            }}>
+              ⚠️ {error}
+            </div>
+          )}
 
           {tripData && (
             <div style={{ marginTop: '20px' }}>
-              {/* Updated Metrics Box featuring the Spotter required Fuel Cost */}
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '15px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '15px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between' }}>
                 <div>
-                  <small style={{ color: '#64748b', display: 'block' }}>Distance</small>
+                  <small style={{ color: '#94a3b8', display: 'block' }}>Distance</small>
                   <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{Math.round(tripData.total_distance_miles)} mi</div>
                 </div>
                 <div>
-                  <small style={{ color: '#64748b', display: 'block' }}>Duration</small>
+                  <small style={{ color: '#94a3b8', display: 'block' }}>Duration</small>
                   <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{Math.round(tripData.total_duration_hours)} hrs</div>
                 </div>
                 <div>
-                  <small style={{ color: '#64748b', display: 'block' }}>Est. Fuel Cost</small>
+                  <small style={{ color: '#94a3b8', display: 'block' }}>Est. Fuel Cost</small>
                   <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#10b981' }}>${Number(tripData.total_fuel_cost).toFixed(2)}</div>
                 </div>
               </div>
 
-              <h4>Hours of Service Grid Logs</h4>
+              <h4 style={{ color: '#f8fafc' }}>Hours of Service Grid Logs</h4>
               {Object.keys(tripData.eld_days).sort((a,b)=>a-b).map(dayNum => (
                 <EldGrid key={dayNum} dayNumber={dayNum} events={tripData.eld_days[dayNum]} />
               ))}
@@ -192,85 +405,74 @@ export default function App() {
           )}
         </aside>
 
-        {/* Right Dynamic Map Panel */}
-      <main style={{ flexGrow: 1, position: 'relative', height: '100%' }}>
-        
-        {/* Floating Map Legend Overlay */}
-        <div style={{
-          position: 'absolute',
-          bottom: '24px',
-          left: '24px',
-          background: 'rgba(255, 255, 255, 0.95)',
-          padding: '12px 16px',
-          borderRadius: '8px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          zIndex: 1000,
-          fontFamily: 'sans-serif',
-          fontSize: '12px',
-          border: '1px solid #e2e8f0',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px'
-        }}>
-          <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '2px', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.5px' }}>Route Legend</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#10b981', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
-            <span style={{ color: '#334155', fontWeight: '500' }}>Current Location (Start)</span>
+        <main style={{ flexGrow: 1, position: 'relative', height: '100%' }}>
+          <div style={{
+            position: 'absolute',
+            bottom: '24px',
+            left: '24px',
+            background: '#1e293b',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            zIndex: 1000,
+            fontFamily: 'sans-serif',
+            fontSize: '12px',
+            border: '1px solid #334155',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
+          }}>
+            <div style={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '2px', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.5px' }}>Route Legend</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#10b981', border: '1px solid #fff' }}></div>
+              <span style={{ color: '#e2e8f0', fontWeight: '500' }}>Current Location (Start)</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#f59e0b', border: '1px solid #fff' }}></div>
+              <span style={{ color: '#e2e8f0', fontWeight: '500' }}>Pickup Point</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#ef4444', border: '1px solid #fff' }}></div>
+              <span style={{ color: '#e2e8f0', fontWeight: '500' }}>Dropoff Destination</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#3b82f6', border: '1px solid #fff' }}></div>
+              <span style={{ color: '#e2e8f0', fontWeight: '500' }}>Optimized Fuel Stops</span>
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#f59e0b', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
-            <span style={{ color: '#334155', fontWeight: '500' }}>Pickup Point</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#ef4444', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
-            <span style={{ color: '#334155', fontWeight: '500' }}>Dropoff Destination</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#3b82f6', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
-            <span style={{ color: '#334155', fontWeight: '500' }}>Optimized Fuel Stops</span>
-          </div>
-        </div>
 
-        <MapContainer center={[37.8, -96]} zoom={4} style={{ width: '100%', height: '100%' }}>
-          <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {tripData && tripData.route_geometry && (
-            <Polyline positions={tripData.route_geometry} color="#2563eb" weight={5} opacity={0.75} />
-          )}
-          {tripData && tripData.markers.map((marker, idx) => {
-            // Define custom colors matching the assignment specification
-            let pinColor = '#64748b'; // Default Grey
-            if (marker.type === 'origin') pinColor = '#10b981';   // Green for Start
-            if (marker.type === 'pickup') pinColor = '#f59e0b';   // Orange for Pickup
-            if (marker.type === 'dropoff') pinColor = '#ef4444';  // Red for Dropoff
-            if (marker.type === 'fuel') pinColor = '#3b82f6';     // Vibrant Blue for Fuel Stops
+          <MapContainer center={[37.8, -96]} zoom={4} style={{ width: '100%', height: '100%' }}>
+            <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {tripData && tripData.route_geometry && (
+              <Polyline positions={tripData.route_geometry} color="#2563eb" weight={5} opacity={0.75} />
+            )}
+            {tripData && tripData.markers.map((marker, idx) => {
+              let pinColor = '#64748b';
+              if (marker.type === 'origin') pinColor = '#10b981';
+              if (marker.type === 'pickup') pinColor = '#f59e0b';
+              if (marker.type === 'dropoff') pinColor = '#ef4444';
+              if (marker.type === 'fuel') pinColor = '#3b82f6';
 
-            const customHtmlIcon = L.divIcon({
-              className: 'custom-route-pin',
-              html: `<div style="
-                background-color: ${pinColor}; 
-                width: 16px; 
-                height: 16px; 
-                border-radius: 50%; 
-                border: 2px solid white; 
-                box-shadow: 0 0 6px rgba(0,0,0,0.4);
-              "></div>`,
-              iconSize: [16, 16],
-              iconAnchor: [8, 8],
-            });
+              const customHtmlIcon = L.divIcon({
+                className: 'custom-route-pin',
+                html: `<div style="background-color: ${pinColor}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.4);"></div>`,
+                iconSize: [16, 16],
+                iconAnchor: [8, 8],
+              });
 
-            return (
-              <Marker key={idx} position={marker.coords} icon={customHtmlIcon}>
-                <Popup>
-                  <strong>{marker.name}</strong><br/>
-                  <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>
-                    Type: {marker.type}
-                  </span>
-                </Popup>
-              </Marker>
-            );
-          })}
-        </MapContainer>
-      </main>
+              return (
+                <Marker key={idx} position={marker.coords} icon={customHtmlIcon}>
+                  <Popup>
+                    <strong>{marker.name}</strong><br/>
+                    <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>
+                      Type: {marker.type}
+                    </span>
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MapContainer>
+        </main>
       </div>
     </div>
   );
