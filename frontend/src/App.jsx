@@ -33,10 +33,9 @@ function CityAutocompleteInput({ label, value, onChange, citiesList, isCsvLoadin
     
     const query = text.trim().toLowerCase();
     
-    // Dropdown is active from the very first interaction/character
     let matches = [];
     if (query === '') {
-      matches = citiesList.slice(0, 8); // Show primary choices on empty focus
+      matches = citiesList.slice(0, 8); 
     } else {
       matches = citiesList.filter(city => 
         city.toLowerCase().includes(query)
@@ -210,14 +209,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Parse raw text CSV data streams dynamically
   const parseCsvData = (csvText) => {
     const lines = csvText.split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length < 2) return [];
 
     const headers = lines[0].split(',').map(h => h.replace(/^["']|["']$/g, '').trim().toLowerCase());
     
-    // Automatically locate columns regardless of layout headers
     let cityIdx = headers.findIndex(h => h.includes('city'));
     let stateIdx = headers.findIndex(h => h.includes('state') || h.includes('code'));
 
@@ -238,25 +235,21 @@ export default function App() {
     return Array.from(parsedUnique).sort();
   };
 
-  // Resilient Asset Loading Sequence
   useEffect(() => {
     setIsCsvLoading(true);
     
-    // Attempt 1: Load from local asset directory
     fetch('/us_cities_ref.csv')
       .then(res => {
-        if (!res.ok) throw new Error("Local dataset file missing.");
+        if (!res.ok) throw new Error("Local file missing.");
         return res.text();
       })
       .then(text => {
         const data = parseCsvData(text);
-        if (data.length === 0) throw new Error("Local parse yielded empty results.");
+        if (data.length === 0) throw new Error("Empty parse.");
         setCitiesList(data);
         setIsCsvLoading(false);
       })
       .catch(() => {
-        // Attempt 2: Dynamic network stream failover to trusted open-source repository dataset
-        console.warn("Local file fetch failed. Streaming open-source US Cities database...");
         fetch('https://raw.githubusercontent.com/kelvins/US-Cities-Database/main/csv/us_cities.csv')
           .then(res => {
             if (!res.ok) throw new Error("Network streaming failed.");
@@ -269,7 +262,7 @@ export default function App() {
           })
           .catch(err => {
             console.error(err);
-            setError("Critical Failure: Unable to fetch US locations database locally or via network stream.");
+            setError("Critical Failure: Unable to fetch US locations database.");
             setIsCsvLoading(false);
           });
       });
@@ -281,13 +274,23 @@ export default function App() {
     setError(null);
 
     const normalize = (str) => str.trim().toLowerCase();
+    
+    const currentLoc = normalize(formData.current_location);
+    const pickupLoc = normalize(formData.pickup_location);
+    const dropoffLoc = normalize(formData.dropoff_location);
+
+    if (pickupLoc === dropoffLoc) {
+      setError("Invalid Route: Pickup point and Dropoff destination cannot be identical.");
+      setTripData(null);
+      setLoading(false);
+      return;
+    }
+
     const activeValidSet = new Set(citiesList.map(c => normalize(c)));
+    const isCurrentValid = activeValidSet.has(currentLoc);
+    const isPickupValid = activeValidSet.has(pickupLoc);
+    const isDropoffValid = activeValidSet.has(dropoffLoc);
 
-    const isCurrentValid = activeValidSet.has(normalize(formData.current_location));
-    const isPickupValid = activeValidSet.has(normalize(formData.pickup_location));
-    const isDropoffValid = activeValidSet.has(normalize(formData.dropoff_location));
-
-    // Strict Gate Validation Check: Absolute map/run block if input isn't a valid US city
     if (!isCurrentValid || !isPickupValid || !isDropoffValid) {
       setError("No route for you! Enter a valid location in the US.");
       setTripData(null); 
@@ -446,31 +449,61 @@ export default function App() {
             {tripData && tripData.route_geometry && (
               <Polyline positions={tripData.route_geometry} color="#2563eb" weight={5} opacity={0.75} />
             )}
-            {tripData && tripData.markers.map((marker, idx) => {
-              let pinColor = '#64748b';
-              if (marker.type === 'origin') pinColor = '#10b981';
-              if (marker.type === 'pickup') pinColor = '#f59e0b';
-              if (marker.type === 'dropoff') pinColor = '#ef4444';
-              if (marker.type === 'fuel') pinColor = '#3b82f6';
-
-              const customHtmlIcon = L.divIcon({
-                className: 'custom-route-pin',
-                html: `<div style="background-color: ${pinColor}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.4);"></div>`,
-                iconSize: [16, 16],
-                iconAnchor: [8, 8],
+            
+            {/* Coordinate Collator Engine */}
+            {tripData && (() => {
+              const uniquePoints = [];
+              tripData.markers.forEach((marker) => {
+                const existing = uniquePoints.find(
+                  p => p.coords[0] === marker.coords[0] && p.coords[1] === marker.coords[1]
+                );
+                if (existing) {
+                  if (!existing.types.includes(marker.type)) existing.types.push(marker.type);
+                  if (!existing.names.includes(marker.name)) existing.names.push(marker.name);
+                } else {
+                  uniquePoints.push({
+                    coords: marker.coords,
+                    types: [marker.type],
+                    names: [marker.name]
+                  });
+                }
               });
 
-              return (
-                <Marker key={idx} position={marker.coords} icon={customHtmlIcon}>
-                  <Popup>
-                    <strong>{marker.name}</strong><br/>
-                    <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>
-                      Type: {marker.type}
-                    </span>
-                  </Popup>
-                </Marker>
-              );
-            })}
+              return uniquePoints.map((point, idx) => {
+                let backgroundStyle = '#64748b';
+                
+                // Intelligently generate split linear gradients for overlapping location states
+                if (point.types.includes('origin') && point.types.includes('pickup')) {
+                  backgroundStyle = 'linear-gradient(135deg, #10b981 50%, #f59e0b 50%)';
+                } else if (point.types.includes('origin')) {
+                  backgroundStyle = '#10b981';
+                } else if (point.types.includes('pickup')) {
+                  backgroundStyle = '#f59e0b';
+                } else if (point.types.includes('dropoff')) {
+                  backgroundStyle = '#ef4444';
+                } else if (point.types.includes('fuel')) {
+                  backgroundStyle = '#3b82f6';
+                }
+
+                const customHtmlIcon = L.divIcon({
+                  className: 'custom-route-pin',
+                  html: `<div style="background: ${backgroundStyle}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.4);"></div>`,
+                  iconSize: [16, 16],
+                  iconAnchor: [8, 8],
+                });
+
+                return (
+                  <Marker key={idx} position={point.coords} icon={customHtmlIcon}>
+                    <Popup>
+                      <strong>{point.names.join(' / ')}</strong><br/>
+                      <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>
+                        Type: {point.types.join(' + ')}
+                      </span>
+                    </Popup>
+                  </Marker>
+                );
+              });
+            })()}
           </MapContainer>
         </main>
       </div>
