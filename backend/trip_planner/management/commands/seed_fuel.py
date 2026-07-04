@@ -26,7 +26,7 @@ class Command(BaseCommand):
             default=str(Path(settings.BASE_DIR) / "us_cities_ref.csv"),
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *_args, **options):
         fuel_csv = Path(options["fuel_csv"])
         cities_csv = Path(options["cities_csv"])
 
@@ -40,17 +40,38 @@ class Command(BaseCommand):
             ))
             return
 
-        city_coords = {}
-        with open(cities_csv, encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                key = (row["CITY"].strip().lower(), row["STATE_CODE"].strip().upper())
-                if key not in city_coords:
-                    city_coords[key] = (float(row["LATITUDE"]), float(row["LONGITUDE"]))
+        city_coords = self._load_city_coords(cities_csv)
         self.stdout.write(f"Loaded {len(city_coords)} city/state coordinate pairs.")
 
         self.stdout.write("Clearing existing truck stops records...")
         TruckStop.objects.all().delete()
 
+        stops_to_create, skipped_non_us, skipped_no_match = self._build_truck_stops(
+            fuel_csv, city_coords
+        )
+
+        with transaction.atomic():
+            TruckStop.objects.bulk_create(stops_to_create, batch_size=1000)
+
+        geocoded = sum(1 for s in stops_to_create if s.latitude is not None)
+        self.stdout.write(self.style.SUCCESS(
+            f"Loaded {len(stops_to_create)} stations ({geocoded} geocoded). "
+            f"Skipped {skipped_non_us} non-US rows, {skipped_no_match} rows with no city/state coordinate match."
+        ))
+
+    def _load_city_coords(self, cities_csv):
+        city_coords = {}
+        with open(cities_csv, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                key = (row["CITY"].strip().lower(), row["STATE_CODE"].strip().upper())
+                if key not in city_coords:
+                    city_coords[key] = (
+                        float(row["LATITUDE"]),
+                        float(row["LONGITUDE"]),
+                    )
+        return city_coords
+
+    def _build_truck_stops(self, fuel_csv, city_coords):
         stops_to_create = []
         skipped_non_us = 0
         skipped_no_match = 0
@@ -82,11 +103,4 @@ class Command(BaseCommand):
                     longitude=lon,
                 ))
 
-        with transaction.atomic():
-            TruckStop.objects.bulk_create(stops_to_create, batch_size=1000)
-
-        geocoded = sum(1 for s in stops_to_create if s.latitude is not None)
-        self.stdout.write(self.style.SUCCESS(
-            f"Loaded {len(stops_to_create)} stations ({geocoded} geocoded). "
-            f"Skipped {skipped_non_us} non-US rows, {skipped_no_match} rows with no city/state coordinate match."
-        ))
+        return stops_to_create, skipped_non_us, skipped_no_match
