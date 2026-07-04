@@ -10,7 +10,7 @@ load_dotenv()
 EARTH_RADIUS_MILES = 3958.8
 
 # Simulation constants
-FUEL_INTERVAL_MILES = 1000  # "at least once every 1,000 miles" per assignment
+FUEL_INTERVAL_MILES = 500  # "at least once every 1,000 miles" per assignment
 MILES_PER_GALLON = 10
 CYCLE_LIMIT_MINUTES = 70 * 60
 RESTART_MINUTES = 34 * 60
@@ -201,16 +201,19 @@ def _initialize_simulation_state(start_str, pickup_str, dropoff_str, start_coord
     }
 
 
-def _log_event(state, status, duration_mins, description):
+def _log_event(state, status, duration_mins,activity, location="Unknown"):
     start_time = state["total_minutes"]
     end_time = start_time + duration_mins
+    
+    # "Remarks: This section is vital for recording the city, state, and specific activity"
+    remark = f"{activity}, {location}"
 
     state["timeline_events"].append({
         "status": status,
         "start_time": start_time,
         "end_time": end_time,
         "duration": duration_mins,
-        "description": description,
+        "remark": remark, # Added field for ELD compliance
     })
 
     if status == "Driving":
@@ -268,15 +271,23 @@ def _handle_fuel_stop(state, leg_data, label, start_coords, total_leg_mins, rema
     idx = int(ratio * (len(leg_data["path"]) - 1))
     fuel_coords = leg_data["path"][idx] if leg_data["path"] else start_coords
 
-    cheapest_stop, fuel_price = find_cheapest_nearby_station(fuel_coords[0], fuel_coords[1])
+    # Search within a 35-mile radius of this route coordinate point for the absolute cheapest option
+    cheapest_stop, fuel_price = find_cheapest_nearby_station(fuel_coords[0], fuel_coords[1], radius_miles=35)
+    
     gallons_needed = state["odometer_since_fuel"] / MILES_PER_GALLON
     state["total_fuel_cost"] += gallons_needed * fuel_price
-    stop_name = cheapest_stop.name if cheapest_stop else "Nearest available fuel station"
+    
+    stop_name = cheapest_stop.name if cheapest_stop else f"Truck Stop Route Point ({fuel_coords[0]:.4f}, {fuel_coords[1]:.4f})"
 
+    # Logs it to the On Duty row so your frontend ELD graph lights up perfectly!
     _log_event(state, "On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
-    state["markers"].append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
+    
+    state["markers"].append({
+        "name": f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)", 
+        "coords": fuel_coords, 
+        "type": "fuel"
+    })
     state["odometer_since_fuel"] = 0
-
 
 def _simulate_leg(state, leg_data, label, start_coords):
     remaining_mins = int(leg_data["duration"] * 60)
@@ -317,13 +328,8 @@ def _apply_post_leg_rest(state):
 
 
 def _split_timeline_into_days(timeline_events):
-    """
-    Slices a continuous timeline into standard 24-hour (1440 minute) ELD log buckets.
-    Forces day steps to integer types to safely feed Python's range function[cite: 2].
-    """
     days_payload = {}
     for event in timeline_events:
-        # Forcing int() ensures that even if times are floats, range() receives integer bounds[cite: 2]
         start_day = int(event["start_time"] // 1440) + 1
         end_day = int(event["end_time"] // 1440) + 1
         current_event_start = event["start_time"]
@@ -342,11 +348,12 @@ def _split_timeline_into_days(timeline_events):
                 "status": event["status"],
                 "start_minute": int(chunk_start - day_start_bound),
                 "end_minute": int(chunk_end - day_start_bound),
-                "description": event["description"],
+                "remark": event["remark"], # Carry over remark to the daily view
             })
             current_event_start = chunk_end
             
     return days_payload
+
 def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
     """
     Executes trip optimization using exactly ONE consolidated external routing
@@ -378,6 +385,13 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
 
     days_payload = _split_timeline_into_days(state["timeline_events"])
 
+    # When calling _log_event throughout, update calls to include location/activity
+    # Example:
+    # _log_event(state, "On Duty (Not Driving)", 60, "Loading cargo", pickup_str)
+    
+    # Calculate daily totals for compliance documentation
+    daily_summaries = _calculate_daily_summary(days_payload)
+
     return {
         "total_distance_miles": round(leg_1["distance"] + leg_2["distance"], 2),
         "total_duration_hours": round(state["total_minutes"] / 60.0, 2),
@@ -386,4 +400,15 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
         "route_geometry": leg_1["path"] + leg_2["path"],
         "markers": state["markers"],
         "eld_days": days_payload,
+        "daily_summaries": daily_summaries, # New field for compliance math
     }
+
+def _calculate_daily_summary(days_payload):
+    summary = {}
+    for day, events in days_payload.items():
+        totals = {"Driving": 0, "On Duty (Not Driving)": 0, "Off Duty": 0, "Sleeper Berth": 0}
+        for e in events:
+            duration = e["end_minute"] - e["start_minute"]
+            totals[e["status"]] = totals.get(e["status"], 0) + duration
+        summary[day] = totals
+    return summary
