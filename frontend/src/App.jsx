@@ -193,84 +193,84 @@ export default function App() {
         </aside>
 
         {/* Right Dynamic Map Panel */}
-        <main style={{ flexGrow: 1, position: 'relative', height: '100%' }}>
-          
-          {/* Floating Map Legend Overlay */}
-          <div style={{
-            position: 'absolute',
-            bottom: '24px',
-            left: '24px',
-            background: 'rgba(255, 255, 255, 0.95)',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-            zIndex: 1000,
-            fontFamily: 'sans-serif',
-            fontSize: '12px',
-            border: '1px solid #e2e8f0',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px'
-          }}>
-            <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '2px', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.5px' }}>Route Legend</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#10b981', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
-              <span style={{ color: '#334155', fontWeight: '500' }}>Current Location (Start)</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#f59e0b', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
-              <span style={{ color: '#334155', fontWeight: '500' }}>Pickup Point</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#ef4444', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
-              <span style={{ color: '#334155', fontWeight: '500' }}>Dropoff Destination</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#3b82f6', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
-              <span style={{ color: '#334155', fontWeight: '500' }}>Optimized Fuel Stops</span>
-            </div>
+      <main style={{ flexGrow: 1, position: 'relative', height: '100%' }}>
+        
+        {/* Floating Map Legend Overlay */}
+        <div style={{
+          position: 'absolute',
+          bottom: '24px',
+          left: '24px',
+          background: 'rgba(255, 255, 255, 0.95)',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1000,
+          fontFamily: 'sans-serif',
+          fontSize: '12px',
+          border: '1px solid #e2e8f0',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '2px', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.5px' }}>Route Legend</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#10b981', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
+            <span style={{ color: '#334155', fontWeight: '500' }}>Current Location (Start)</span>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#f59e0b', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
+            <span style={{ color: '#334155', fontWeight: '500' }}>Pickup Point</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#ef4444', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
+            <span style={{ color: '#334155', fontWeight: '500' }}>Dropoff Destination</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#3b82f6', border: '1px solid #fff', boxShadow: '0 0 2px rgba(0,0,0,0.3)' }}></div>
+            <span style={{ color: '#334155', fontWeight: '500' }}>Optimized Fuel Stops</span>
+          </div>
+        </div>
 
-          <MapContainer center={[37.8, -96]} zoom={4} style={{ width: '100%', height: '100%' }}>
-            <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            {tripData && tripData.route_geometry && (
-              <Polyline positions={tripData.route_geometry} color="#2563eb" weight={5} opacity={0.75} />
-            )}
-            {tripData && tripData.markers.map((marker, idx) => {
-              // Define custom colors matching the assignment specification
-              let pinColor = '#64748b'; // Default Grey
-              if (marker.type === 'origin') pinColor = '#10b981';   // Green for Start
-              if (marker.type === 'pickup') pinColor = '#f59e0b';   // Orange for Pickup
-              if (marker.type === 'dropoff') pinColor = '#ef4444';  // Red for Dropoff
-              if (marker.type === 'fuel') pinColor = '#3b82f6';     // Vibrant Blue for Fuel Stops
+        <MapContainer center={[37.8, -96]} zoom={4} style={{ width: '100%', height: '100%' }}>
+          <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          {tripData && tripData.route_geometry && (
+            <Polyline positions={tripData.route_geometry} color="#2563eb" weight={5} opacity={0.75} />
+          )}
+          {tripData && tripData.markers.map((marker, idx) => {
+            // Define custom colors matching the assignment specification
+            let pinColor = '#64748b'; // Default Grey
+            if (marker.type === 'origin') pinColor = '#10b981';   // Green for Start
+            if (marker.type === 'pickup') pinColor = '#f59e0b';   // Orange for Pickup
+            if (marker.type === 'dropoff') pinColor = '#ef4444';  // Red for Dropoff
+            if (marker.type === 'fuel') pinColor = '#3b82f6';     // Vibrant Blue for Fuel Stops
 
-              const customHtmlIcon = L.divIcon({
-                className: 'custom-route-pin',
-                html: `<div style="
-                  background-color: ${pinColor}; 
-                  width: 16px; 
-                  height: 16px; 
-                  border-radius: 50%; 
-                  border: 2px solid white; 
-                  box-shadow: 0 0 6px rgba(0,0,0,0.4);
-                "></div>`,
-                iconSize: [16, 16],
-                iconAnchor: [8, 8],
-              });
+            const customHtmlIcon = L.divIcon({
+              className: 'custom-route-pin',
+              html: `<div style="
+                background-color: ${pinColor}; 
+                width: 16px; 
+                height: 16px; 
+                border-radius: 50%; 
+                border: 2px solid white; 
+                box-shadow: 0 0 6px rgba(0,0,0,0.4);
+              "></div>`,
+              iconSize: [16, 16],
+              iconAnchor: [8, 8],
+            });
 
-              return (
-                <Marker key={idx} position={marker.coords} icon={customHtmlIcon}>
-                  <Popup>
-                    <strong>{marker.name}</strong><br/>
-                    <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>
-                      Type: {marker.type}
-                    </span>
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
-        </main>
+            return (
+              <Marker key={idx} position={marker.coords} icon={customHtmlIcon}>
+                <Popup>
+                  <strong>{marker.name}</strong><br/>
+                  <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>
+                    Type: {marker.type}
+                  </span>
+                </Popup>
+              </Marker>
+            );
+          })}
+        </MapContainer>
+      </main>
       </div>
     </div>
   );
