@@ -1,4 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+my_venv/
+venv/
+.venv/
+*.egg-info/
 
+# Node
+node_modules/
+dist/
 
-#Ignore vscode AI rules
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
+
+# Editor
 .github/instructions/codacy.instructions.md
