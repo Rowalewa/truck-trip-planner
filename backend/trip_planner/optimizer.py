@@ -251,10 +251,10 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
             current_event_start = chunk_end
 
     return {
-        "total_distance_miles": leg_1['distance'] + leg_2['distance'],
-        "total_duration_hours": total_minutes / 60.0,
-        "total_fuel_cost": round(total_fuel_cost, 2),  # Explicitly required operational cost metric
-        "route_geometry": leg_1['path'] + leg_2['path'],
-        "markers": markers,
-        "eld_days": days_payload
+    "total_distance_miles": round(leg_1['distance'] + leg_2['distance'], 2),
+    "total_duration_hours": round(total_minutes / 60.0, 2),
+    "total_fuel_cost": round(total_fuel_cost, 2),  
+    "route_geometry": leg_1['path'] + leg_2['path'],
+    "markers": markers,
+    "eld_days": days_payload
     }
