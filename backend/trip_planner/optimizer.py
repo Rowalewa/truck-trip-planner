@@ -1,6 +1,9 @@
 import os
+import csv
 import requests
 import math
+from pathlib import Path
+from django.conf import settings
 from dotenv import load_dotenv
 from .models import TruckStop
 
@@ -9,8 +12,48 @@ load_dotenv()
 
 EARTH_RADIUS_MILES = 3958.8
 
+_CITY_INDEX = None
+
+
+def _load_city_index():
+    """Lazily builds a coarse grid index over us_cities_ref.csv (already in
+    this repo for fuel-station geocoding) so remarks can show a real
+    city/state instead of 'Unknown' -- with zero extra API calls."""
+    global _CITY_INDEX
+    if _CITY_INDEX is not None:
+        return _CITY_INDEX
+
+    index = {}
+    path = Path(settings.BASE_DIR) / "us_cities_ref.csv"
+    try:
+        with open(path, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    lat, lon = float(row["LATITUDE"]), float(row["LONGITUDE"])
+                except (KeyError, ValueError):
+                    continue
+                key = (round(lat), round(lon))
+                index.setdefault(key, []).append((lat, lon, row["CITY"].strip(), row["STATE_CODE"].strip()))
+    except FileNotFoundError:
+        pass
+    _CITY_INDEX = index
+    return index
+
+
+def _nearest_city_label(lat, lon):
+    index = _load_city_index()
+    key = (round(lat), round(lon))
+    candidates = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            candidates.extend(index.get((key[0] + dx, key[1] + dy), []))
+    if not candidates:
+        return "Unknown location"
+    best = min(candidates, key=lambda c: _haversine_miles(lat, lon, c[0], c[1]))
+    return f"{best[2]}, {best[3]}"
+
 # Simulation constants
-FUEL_INTERVAL_MILES = 500  # "at least once every 1,000 miles" per assignment
+FUEL_INTERVAL_MILES = 1000  # "at least once every 1,000 miles" per assignment
 MILES_PER_GALLON = 10
 CYCLE_LIMIT_MINUTES = 70 * 60
 RESTART_MINUTES = 34 * 60
@@ -198,10 +241,13 @@ def _initialize_simulation_state(start_str, pickup_str, dropoff_str, start_coord
         "duty_minutes_today": 0,
         "elapsed_since_last_break": 0,
         "cycle_minutes_used": cycle_hours_used * 60,
+        "current_location_label": start_str,
     }
 
 
-def _log_event(state, status, duration_mins,activity, location="Unknown"):
+def _log_event(state, status, duration_mins, activity, location=None):
+    if location is None:
+        location = state.get("current_location_label", "Unknown location")
     start_time = state["total_minutes"]
     end_time = start_time + duration_mins
     
@@ -278,9 +324,11 @@ def _handle_fuel_stop(state, leg_data, label, start_coords, total_leg_mins, rema
     state["total_fuel_cost"] += gallons_needed * fuel_price
     
     stop_name = cheapest_stop.name if cheapest_stop else f"Truck Stop Route Point ({fuel_coords[0]:.4f}, {fuel_coords[1]:.4f})"
+    stop_location = f"{cheapest_stop.city}, {cheapest_stop.state}" if cheapest_stop else _nearest_city_label(fuel_coords[0], fuel_coords[1])
+    state["current_location_label"] = stop_location
 
     # Logs it to the On Duty row so your frontend ELD graph lights up perfectly!
-    _log_event(state, "On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
+    _log_event(state, "On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)", location=stop_location)
     
     state["markers"].append({
         "name": f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)", 
@@ -310,6 +358,11 @@ def _simulate_leg(state, leg_data, label, start_coords):
         )
 
         if drive_chunk > 0:
+            progress_ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins) if total_leg_mins else 0.0
+            idx = int(progress_ratio * (len(leg_data["path"]) - 1)) if leg_data["path"] else 0
+            point = leg_data["path"][idx] if leg_data["path"] else start_coords
+            state["current_location_label"] = _nearest_city_label(point[0], point[1])
+
             _log_event(state, "Driving", drive_chunk, f"Driving towards {label}")
             state["odometer_since_fuel"] += drive_chunk * speed_mpm
             remaining_mins -= drive_chunk
@@ -377,18 +430,13 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
 
     _simulate_leg(state, leg_1, "Pickup location", start_coords)
     _apply_post_leg_rest(state)
-    _log_event(state, "On Duty (Not Driving)", 60, "Loading cargo at Pickup point")
+    _log_event(state, "On Duty (Not Driving)", 60, "Loading cargo at Pickup point", location=pickup_str)
 
     _simulate_leg(state, leg_2, "Dropoff destination", start_coords)
     _apply_post_leg_rest(state)
-    _log_event(state, "On Duty (Not Driving)", 60, "Unloading cargo at Dropoff point")
+    _log_event(state, "On Duty (Not Driving)", 60, "Unloading cargo at Dropoff point", location=dropoff_str)
 
     days_payload = _split_timeline_into_days(state["timeline_events"])
-
-    # When calling _log_event throughout, update calls to include location/activity
-    # Example:
-    # _log_event(state, "On Duty (Not Driving)", 60, "Loading cargo", pickup_str)
-    
     # Calculate daily totals for compliance documentation
     daily_summaries = _calculate_daily_summary(days_payload)
 
