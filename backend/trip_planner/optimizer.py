@@ -6,19 +6,30 @@ import math
 
 def geocode_location(location_string):
     """
-    Converts a location string (e.g., 'Tomah, WI') into (latitude, longitude)
-    using the free OpenStreetMap Nominatim API.
+    Attempts to geocode locally using the pre-existing TruckStop database first to eliminate 
+    external network overhead. Falls back to Nominatim only if the city isn't in the dataset.
     """
+    # 1. Try local database extraction to maintain 0-network latency
+    try:
+        parts = [p.strip() for p in location_string.split(",")]
+        if len(parts) >= 2:
+            city = parts[0]
+            state = parts[1].split()[0] # Strip zip codes if present
+            
+            # Query the database for matching city/state configurations
+            match = TruckStop.objects.filter(city__iexact=city, state__iexact=state).first()
+            if match and getattr(match, 'latitude', None) and getattr(match, 'longitude', None):
+                return float(match.latitude), float(match.longitude)
+    except Exception:
+        pass
+
+    # 2. Fallback to external API if address is outside our seeded dataset bounds
     url = f"https://nominatim.openstreetmap.org/search"
     headers = {
         'User-Agent': 'TruckTripPlannerAssessment/1.0',
-        'From': 'safety-buffer-compliance@domain.com'  # Identifies traffic to prevent Nominatim dropouts
+        'From': 'safety-buffer-compliance@domain.com'
     }
-    params = {
-        'q': location_string,
-        'format': 'json',
-        'limit': 1
-    }
+    params = {'q': location_string, 'format': 'json', 'limit': 1}
     
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)
@@ -26,66 +37,67 @@ def geocode_location(location_string):
         if data:
             return float(data[0]['lat']), float(data[0]['lon'])
     except Exception as e:
-        print(f"Geocoding error for {location_string}: {e}")
-    return None
-
-def get_route_data(start_coords, end_coords):
-    """
-    Fetches route distance, duration, and geometry path coordinates
-    using the free OSRM (Open Source Routing Machine) API.
-    """
-    # OSRM expects coordinates in Lon,Lat format
-    url = f"http://router.project-osrm.org/route/v1/driving/{start_coords[1]},{start_coords[0]};{end_coords[1]},{end_coords[0]}"
-    params = {
-        'overview': 'full',
-        'geometries': 'geojson'
-    }
-    
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        if data and data.get('routes'):
-            route = data['routes'][0]
-            # distance is returned in meters -> convert to miles
-            distance_miles = route['distance'] * 0.000621371
-            # duration is returned in seconds -> convert to hours
-            duration_hours = route['duration'] / 3600.0
-            # coordinates are a list of [lon, lat] pairs along the path
-            geometry_coords = route['geometry']['coordinates']
-            
-            return {
-                'distance': distance_miles,
-                'duration': duration_hours,
-                'path': [[lat, lon] for lon, lat in geometry_coords] # Flip to [lat, lon] for frontend maps
-            }
-    except Exception as e:
-        print(f"Routing error: {e}")
+        print(f"Geocoding fallback error for {location_string}: {e}")
     return None
 
 def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
     """
-    Simulates the multi-day trip while dynamically checking fuel and HOS limits.
-    Guarantees that fuel stops are processed sequentially to eliminate 8-hour drive violations.
+    Executes the entire trip optimization logic using exactly ONE consolidated 
+    external routing call, maximizing API efficiency and processing latency.
     """
-    # --- Prompt Defined Constants ---
     MAX_RANGE_MILES = 500
     SAFETY_BUFFER_MILES = 450
     MILES_PER_GALLON = 10
     FALLBACK_FUEL_PRICE = 3.50
 
+    # Retrieve coordinate anchors
     start_coords = geocode_location(start_str)
     pickup_coords = geocode_location(pickup_str)
     dropoff_coords = geocode_location(dropoff_str)
     
     if not start_coords or not pickup_coords or not dropoff_coords:
         return {"error": "Could not locate one or more entered addresses."}
-        
-    leg_1 = get_route_data(start_coords, pickup_coords)
-    leg_2 = get_route_data(pickup_coords, dropoff_coords)
-    
-    if not leg_1 or not leg_2:
-        return {"error": "Could not calculate driving routes between locations."}
 
+    # --- SINGLE CONSOLIDATED EXTERNAL NETWORK CALL ---
+    # String coordinates sequentially separated by semicolons: start;pickup;dropoff
+    url = f"http://router.project-osrm.org/route/v1/driving/{start_coords[1]},{start_coords[0]};{pickup_coords[1]},{pickup_coords[0]};{dropoff_coords[1]},{dropoff_coords[0]}"
+    params = {'overview': 'full', 'geometries': 'geojson'}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        if not data or not data.get('routes'):
+            return {"error": "Could not calculate driving routes between locations."}
+        
+        route = data['routes'][0]
+        legs = route['legs']
+        full_geometry = route['geometry']['coordinates']
+        full_path = [[lat, lon] for lon, lat in full_geometry] # Map back to lat/lon for maps
+        
+        # Parse Leg 1 (Start -> Pickup)
+        leg_1_dist = legs[0]['distance'] * 0.000621371
+        leg_1_dur = legs[0]['duration'] / 3600.0
+        
+        # Parse Leg 2 (Pickup -> Dropoff)
+        leg_2_dist = legs[1]['distance'] * 0.000621371
+        leg_2_dur = legs[1]['duration'] / 3600.0
+
+        # Mathematically split unified geometry array based on proximity to pickup coordinates
+        closest_idx = 0
+        min_dist = float('inf')
+        for i, (lat, lon) in enumerate(full_path):
+            d = (lat - pickup_coords[0])**2 + (lon - pickup_coords[1])**2
+            if d < min_dist:
+                min_dist = d
+                closest_idx = i
+
+        leg_1 = {'distance': leg_1_dist, 'duration': leg_1_dur, 'path': full_path[:closest_idx + 1]}
+        leg_2 = {'distance': leg_2_dist, 'duration': leg_2_dur, 'path': full_path[closest_idx:]}
+
+    except Exception as e:
+        return {"error": f"External Routing Matrix Connection Failure: {e}"}
+
+    # --- SIMULATION ENGINE ENGINE ---
     timeline_events = []
     markers = [
         {"name": f"Start: {start_str}", "coords": start_coords, "type": "origin"},
@@ -136,7 +148,6 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
         speed_mpm = leg_data['distance'] / remaining_mins if remaining_mins > 0 else 0
         
         while remaining_mins > 0:
-            # 1. Check strict HOS boundaries first
             if driving_minutes_today >= 660 or duty_minutes_today >= 840:
                 log_event("Sleeper Berth", 600, "Mandatory 10-hour rest period (Daily cycle reset)")
                 continue
@@ -144,12 +155,9 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
                 log_event("Off Duty", 30, "Mandatory 30-minute rest break (8-hour rule)")
                 continue
 
-            # 2. Calculate remaining operational windows
             mins_to_8_hr_break = max(0, 480 - elapsed_since_last_break)
             mins_to_11_hr_break = max(0, 660 - driving_minutes_today)
             mins_to_14_hr_break = max(0, 840 - duty_minutes_today)
-            
-            # Bound driving chunk by the 450-mile safety buffer threshold
             mins_to_fuel_buffer = max(0, (SAFETY_BUFFER_MILES - odometer_since_fuel) / speed_mpm) if speed_mpm > 0 else 9999
             
             drive_chunk = min(remaining_mins, mins_to_8_hr_break, mins_to_11_hr_break, mins_to_14_hr_break, int(mins_to_fuel_buffer))
@@ -159,33 +167,25 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
                 odometer_since_fuel += (drive_chunk * speed_mpm)
                 remaining_mins -= drive_chunk
                 
-                # Trigger optimized fuel stop if safety threshold is met or breached
                 if odometer_since_fuel >= SAFETY_BUFFER_MILES:
                     cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
-                    
-                    # Explicit float cast to eliminate Decimal mismatch exceptions 🛡️
                     fuel_price = float(cheapest_stop.retail_price) if cheapest_stop else FALLBACK_FUEL_PRICE
                     
-                    # Compute leg financial metrics (float * float safety)
                     gallons_needed = odometer_since_fuel / MILES_PER_GALLON
                     total_fuel_cost += (gallons_needed * fuel_price)
                     
                     stop_name = cheapest_stop.name if cheapest_stop else "Optimized Fuel Station"
-                    price_str = f"${fuel_price:.2f}/gal"
-                    log_event("On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} ({price_str})")
+                    log_event("On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
                     
                     ratio = min(1.0, (int(leg_data['duration'] * 60) - remaining_mins) / max(1, int(leg_data['duration'] * 60)))
                     idx = int(ratio * (len(leg_data['path']) - 1))
-                    fuel_coords = [cheapest_stop.latitude, cheapest_stop.longitude] if (cheapest_stop and getattr(cheapest_stop, 'latitude', None)) else (leg_data['path'][idx] if leg_data['path'] else start_coords)
+                    fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
                     
                     markers.append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
                     odometer_since_fuel = 0
             else:
-                # Handle edge cases where driving chunk hits 0 precisely due to rounding limits at the buffer point
                 if odometer_since_fuel >= SAFETY_BUFFER_MILES or int(mins_to_fuel_buffer) <= 0:
                     cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
-                    
-                    # Explicit float cast to eliminate Decimal mismatch exceptions 🛡️
                     fuel_price = float(cheapest_stop.retail_price) if cheapest_stop else FALLBACK_FUEL_PRICE
                     
                     gallons_needed = odometer_since_fuel / MILES_PER_GALLON
@@ -197,32 +197,30 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
                     total_leg_mins = max(1, int(leg_data['duration'] * 60))
                     ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
                     idx = int(ratio * (len(leg_data['path']) - 1))
-                    fuel_coords = [cheapest_stop.latitude, cheapest_stop.longitude] if (cheapest_stop and getattr(cheapest_stop, 'latitude', None)) else (leg_data['path'][idx] if leg_data['path'] else start_coords)
+                    fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
                     
                     markers.append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
                     odometer_since_fuel = 0
                 else:
                     log_event("Off Duty", 30, "Mandatory 30-minute rest break (8-hour rule)")
 
-    # Execute Leg 1 (Start -> Pickup)
+    # Execute Simulation Legs
     state_1 = pickup_str.split(",")[-1].strip().split(" ")[0]
     simulate_leg(leg_1, state_1, "Pickup location")
     
-    # Arrival Tasks at Pickup
     if driving_minutes_today >= 660 or duty_minutes_today >= 840:
         log_event("Sleeper Berth", 600, "Mandatory 10-hour rest period (Daily cycle reset)")
     log_event("On Duty (Not Driving)", 60, "Loading cargo at Pickup point")
     
-    # Execute Leg 2 (Pickup -> Dropoff)
+    # Execute Leg 2
     state_2 = dropoff_str.split(",")[-1].strip().split(" ")[0]
     simulate_leg(leg_2, state_2, "Dropoff destination")
     
-    # Arrival Tasks at Dropoff
     if driving_minutes_today >= 660 or duty_minutes_today >= 840:
         log_event("Sleeper Berth", 600, "Mandatory 10-hour rest period (Daily cycle reset)")
     log_event("On Duty (Not Driving)", 60, "Unloading cargo at Dropoff point")
 
-    # Format output timelines into 24-hour daily segments
+    # Group into 24-hour logs
     days_payload = {}
     for event in timeline_events:
         start_day = (event['start_time'] // 1440) + 1
@@ -238,7 +236,6 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
             
             if chunk_start >= chunk_end:
                 continue
-                
             if day not in days_payload:
                 days_payload[day] = []
                 
@@ -250,11 +247,12 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
             })
             current_event_start = chunk_end
 
+    # Return clean, rounded outputs to satisfy Postman presentation guidelines
     return {
-    "total_distance_miles": round(leg_1['distance'] + leg_2['distance'], 2),
-    "total_duration_hours": round(total_minutes / 60.0, 2),
-    "total_fuel_cost": round(total_fuel_cost, 2),  
-    "route_geometry": leg_1['path'] + leg_2['path'],
-    "markers": markers,
-    "eld_days": days_payload
+        "total_distance_miles": round(leg_1['distance'] + leg_2['distance'], 2),
+        "total_duration_hours": round(total_minutes / 60.0, 2),
+        "total_fuel_cost": round(total_fuel_cost, 2),
+        "route_geometry": leg_1['path'] + leg_2['path'],
+        "markers": markers,
+        "eld_days": days_payload
     }
