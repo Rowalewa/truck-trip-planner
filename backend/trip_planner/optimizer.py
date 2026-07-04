@@ -6,24 +6,9 @@ import math
 
 def geocode_location(location_string):
     """
-    Attempts to geocode locally using the pre-existing TruckStop database first to eliminate 
-    external network overhead. Falls back to Nominatim only if the city isn't in the dataset.
+    Attempts to geocode by falling back to Nominatim safely, since the local
+    database only contains text-based state and city profiles without coordinates.
     """
-    # 1. Try local database extraction to maintain 0-network latency
-    try:
-        parts = [p.strip() for p in location_string.split(",")]
-        if len(parts) >= 2:
-            city = parts[0]
-            state = parts[1].split()[0] # Strip zip codes if present
-            
-            # Query the database for matching city/state configurations
-            match = TruckStop.objects.filter(city__iexact=city, state__iexact=state).first()
-            if match and getattr(match, 'latitude', None) and getattr(match, 'longitude', None):
-                return float(match.latitude), float(match.longitude)
-    except Exception:
-        pass
-
-    # 2. Fallback to external API if address is outside our seeded dataset bounds
     url = f"https://nominatim.openstreetmap.org/search"
     headers = {
         'User-Agent': 'TruckTripPlannerAssessment/1.0',
@@ -37,13 +22,13 @@ def geocode_location(location_string):
         if data:
             return float(data[0]['lat']), float(data[0]['lon'])
     except Exception as e:
-        print(f"Geocoding fallback error for {location_string}: {e}")
+        print(f"Geocoding error for {location_string}: {e}")
     return None
 
 def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
     """
-    Executes the entire trip optimization logic using exactly ONE consolidated 
-    external routing call, maximizing API efficiency and processing latency.
+    Executes trip optimization using exactly ONE consolidated external routing call,
+    calculating fuel stops using valid database attributes (state and retail_price).
     """
     MAX_RANGE_MILES = 500
     SAFETY_BUFFER_MILES = 450
@@ -59,7 +44,6 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
         return {"error": "Could not locate one or more entered addresses."}
 
     # --- SINGLE CONSOLIDATED EXTERNAL NETWORK CALL ---
-    # String coordinates sequentially separated by semicolons: start;pickup;dropoff
     url = f"http://router.project-osrm.org/route/v1/driving/{start_coords[1]},{start_coords[0]};{pickup_coords[1]},{pickup_coords[0]};{dropoff_coords[1]},{dropoff_coords[0]}"
     params = {'overview': 'full', 'geometries': 'geojson'}
     
@@ -72,7 +56,7 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
         route = data['routes'][0]
         legs = route['legs']
         full_geometry = route['geometry']['coordinates']
-        full_path = [[lat, lon] for lon, lat in full_geometry] # Map back to lat/lon for maps
+        full_path = [[lat, lon] for lon, lat in full_geometry]
         
         # Parse Leg 1 (Start -> Pickup)
         leg_1_dist = legs[0]['distance'] * 0.000621371
@@ -82,7 +66,7 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
         leg_2_dist = legs[1]['distance'] * 0.000621371
         leg_2_dur = legs[1]['duration'] / 3600.0
 
-        # Mathematically split unified geometry array based on proximity to pickup coordinates
+        # Split unified geometry array based on proximity to pickup coordinates
         closest_idx = 0
         min_dist = float('inf')
         for i, (lat, lon) in enumerate(full_path):
@@ -97,7 +81,7 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
     except Exception as e:
         return {"error": f"External Routing Matrix Connection Failure: {e}"}
 
-    # --- SIMULATION ENGINE ENGINE ---
+    # --- SIMULATION ENGINE ---
     timeline_events = []
     markers = [
         {"name": f"Start: {start_str}", "coords": start_coords, "type": "origin"},
@@ -146,7 +130,7 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
         nonlocal odometer_since_fuel, total_fuel_cost
         remaining_mins = int(leg_data['duration'] * 60)
         speed_mpm = leg_data['distance'] / remaining_mins if remaining_mins > 0 else 0
-    
+        
         while remaining_mins > 0:
             if driving_minutes_today >= 660 or duty_minutes_today >= 840:
                 log_event("Sleeper Berth", 600, "Mandatory 10-hour rest period (Daily cycle reset)")
@@ -168,57 +152,44 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
                 remaining_mins -= drive_chunk
                 
                 if odometer_since_fuel >= SAFETY_BUFFER_MILES:
-                    # 1. Calculate physical coordinates where the safety buffer was crossed
-                    total_leg_mins = max(1, int(leg_data['duration'] * 60))
-                    ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
-                    idx = int(ratio * (len(leg_data['path']) - 1))
-                    fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
-                    
-                    # 2. Query locally for the cheapest station physically near the truck's path location
-                    fuel_lat, fuel_lon = fuel_coords[0], fuel_coords[1]
-                    nearby_stops = TruckStop.objects.filter(
-                        latitude__range=(fuel_lat - 1.5, fuel_lat + 1.5),
-                        longitude__range=(fuel_lon - 1.5, fuel_lon + 1.5)
-                    )
-                    cheapest_stop = nearby_stops.order_by('retail_price').first()
-                    if not cheapest_stop:
-                        cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
-                    
+                    # Query strictly by valid fields: state and retail_price
+                    cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
                     fuel_price = float(cheapest_stop.retail_price) if cheapest_stop else FALLBACK_FUEL_PRICE
+                    
                     gallons_needed = odometer_since_fuel / MILES_PER_GALLON
                     total_fuel_cost += (gallons_needed * fuel_price)
                     
                     stop_name = cheapest_stop.name if cheapest_stop else "Optimized Fuel Station"
                     log_event("On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
+                    
+                    total_leg_mins = max(1, int(leg_data['duration'] * 60))
+                    ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
+                    idx = int(ratio * (len(leg_data['path']) - 1))
+                    fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
+                    
                     markers.append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
                     odometer_since_fuel = 0
             else:
                 if odometer_since_fuel >= SAFETY_BUFFER_MILES or int(mins_to_fuel_buffer) <= 0:
-                    total_leg_mins = max(1, int(leg_data['duration'] * 60))
-                    ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
-                    idx = int(ratio * (len(leg_data['path']) - 1))
-                    fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
-                    
-                    fuel_lat, fuel_lon = fuel_coords[0], fuel_coords[1]
-                    nearby_stops = TruckStop.objects.filter(
-                        latitude__range=(fuel_lat - 1.5, fuel_lat + 1.5),
-                        longitude__range=(fuel_lon - 1.5, fuel_lon + 1.5)
-                    )
-                    cheapest_stop = nearby_stops.order_by('retail_price').first()
-                    if not cheapest_stop:
-                        cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
-                    
+                    cheapest_stop = TruckStop.objects.filter(state=target_state).order_by('retail_price').first()
                     fuel_price = float(cheapest_stop.retail_price) if cheapest_stop else FALLBACK_FUEL_PRICE
+                    
                     gallons_needed = odometer_since_fuel / MILES_PER_GALLON
                     total_fuel_cost += (gallons_needed * fuel_price)
                     
                     stop_name = cheapest_stop.name if cheapest_stop else "Optimized Fuel Station"
                     log_event("On Duty (Not Driving)", 30, f"Fuel Stop: {stop_name} (${fuel_price:.2f}/gal)")
+                    
+                    total_leg_mins = max(1, int(leg_data['duration'] * 60))
+                    ratio = min(1.0, (total_leg_mins - remaining_mins) / total_leg_mins)
+                    idx = int(ratio * (len(leg_data['path']) - 1))
+                    fuel_coords = leg_data['path'][idx] if leg_data['path'] else start_coords
+                    
                     markers.append({"name": f"Fuel: {stop_name}", "coords": fuel_coords, "type": "fuel"})
                     odometer_since_fuel = 0
                 else:
                     log_event("Off Duty", 30, "Mandatory 30-minute rest break (8-hour rule)")
-                    
+
     # Execute Simulation Legs
     state_1 = pickup_str.split(",")[-1].strip().split(" ")[0]
     simulate_leg(leg_1, state_1, "Pickup location")
@@ -262,7 +233,7 @@ def run_trip_simulation(start_str, pickup_str, dropoff_str, cycle_hours_used):
             })
             current_event_start = chunk_end
 
-    # Return clean, rounded outputs to satisfy Postman presentation guidelines
+    # Clean, safely rounded outputs for the final payload dictionary contract
     return {
         "total_distance_miles": round(leg_1['distance'] + leg_2['distance'], 2),
         "total_duration_hours": round(total_minutes / 60.0, 2),
