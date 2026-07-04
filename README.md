@@ -8,17 +8,17 @@ A high-performance, **containerless truck trip optimization** and **Hours of Ser
 ### 🗺️ Live Route Planning & ELD Tracking
 Here is the core optimization engine in action, managing advanced spatial routes and tracking historical driving cycles:
 
-<img width="1440" height="812" alt="image" src="https://github.com/user-attachments/assets/4bc9e820-23fd-44f9-963a-47cbd4565dec" />
+<img width="1440" height="900" alt="image" src="https://github.com/user-attachments/assets/db96a7be-23f4-47c1-8f36-0f13d48dccbf" />
 
 
 
 ### 📈 Multi-Day Hours of Service Logs
 The platform dynamically splits continuous trip timelines into exact 24-hour buckets, tracking driver compliance and delivery completion across multiple days:
 
-<img width="1440" height="812" alt="image" src="https://github.com/user-attachments/assets/72d63430-a403-4dfb-92b4-4019f91673e9" />
+<img width="1440" height="900" alt="image" src="https://github.com/user-attachments/assets/d9828db0-7ffa-4bc1-82c6-b1b09667d207" />
 
+<img width="1440" height="900" alt="image" src="https://github.com/user-attachments/assets/bcd7b3d2-cbfa-4755-81a7-25cebcaccd25" />
 
-<img width="1440" height="812" alt="image" src="https://github.com/user-attachments/assets/423a0d74-0e18-41b4-bd4b-9cb6fdf359c1" />
 
 
 ---
